@@ -151,6 +151,27 @@ func itShouldNotContain(text string) error {
 	return nil
 }
 
+// Step: Given the build support directory
+func theBuildSupportDirectoryExists() error {
+	info, err := os.Stat(supportBase)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("support directory not found at %s", supportBase)
+	}
+	return nil
+}
+
+// Step: Then the file "X" should be a shell script
+func theFileShouldBeAShellScript(path string) error {
+	content, err := readFile(path)
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(content, "#!/bin/sh") || strings.HasPrefix(content, "#!/bin/bash") || strings.HasPrefix(content, "#!/bin/ash") {
+		return nil
+	}
+	return fmt.Errorf("file %s is not a shell script (no #!/bin/sh shebang)", path)
+}
+
 // Step: Given the firewall script "X" exists
 func theFirewallScriptExists(path string) error {
 	_, err := readFile(path)
@@ -815,6 +836,8 @@ func itShouldSanitizeTerminalEscapeSequences() error {
 func InitializeScenario(ctx *godog.ScenarioContext) {
 	// Given steps
 	ctx.Step(`^the rootfs-skeleton directory exists$`, theRootfsSkeletonDirectoryExists)
+	ctx.Step(`^the rootfs skeleton directory$`, theRootfsSkeletonDirectoryExists)
+	ctx.Step(`^the build support directory$`, theBuildSupportDirectoryExists)
 	ctx.Step(`^the firewall script "([^"]*)" exists$`, theFirewallScriptExists)
 	ctx.Step(`^the sysctl config "([^"]*)" exists$`, theSysctlConfigExists)
 	ctx.Step(`^the SSH config "([^"]*)" exists$`, theSSHConfigExists)
@@ -833,6 +856,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	// Then steps - file existence and content
 	ctx.Step(`^the file "([^"]*)" should exist$`, theFileShouldExist)
 	ctx.Step(`^the file "([^"]*)" should be executable$`, theFileShouldBeExecutable)
+	ctx.Step(`^the file "([^"]*)" should be a shell script$`, theFileShouldBeAShellScript)
 	ctx.Step(`^the file "([^"]*)" should contain "([^"]*)"$`, theFileShouldContain)
 	ctx.Step(`^the file "([^"]*)" should not contain "([^"]*)"$`, theFileShouldNotContain)
 	ctx.Step(`^the desktop file "([^"]*)" should contain "([^"]*)"$`, theDesktopFileShouldContain)

@@ -1,0 +1,80 @@
+#!/bin/sh
+# /usr/sbin/xrandr-gui
+# Simple multi-monitor setup GUI wrapper
+# Addresses: External display / multi-monitor issues (macOS, Win 8)
+# Provides accessible display configuration
+
+if command -v arandr >/dev/null 2>&1; then
+    exec arandr
+fi
+
+# Fallback: simple xrandr-based display configurator
+if ! command -v xrandr >/dev/null 2>&1; then
+    echo "Error: xrandr not found"
+    exit 1
+fi
+
+OUTPUTS=$(xrandr --query 2>/dev/null | grep ' connected' | cut -d' ' -f1)
+OUTPUT_COUNT=$(echo "$OUTPUTS" | wc -l)
+
+if [ "$OUTPUT_COUNT" -le 1 ]; then
+    if [ -n "$DISPLAY" ] && command -v Xdialog >/dev/null 2>&1; then
+        Xdialog --title "Monitor Setup" --msgbox "Only one monitor detected.\n\nConnect an external monitor and run this tool again." 0 0 2>/dev/null
+    else
+        echo "Only one monitor detected."
+    fi
+    exit 0
+fi
+
+# Multiple monitors found
+PRIMARY=$(echo "$OUTPUTS" | head -1)
+SECONDARY=$(echo "$OUTPUTS" | sed -n '2p')
+
+if [ -n "$DISPLAY" ] && command -v Xdialog >/dev/null 2>&1; then
+    CHOICE=$(Xdialog --title "Multi-Monitor Setup" --no-cancel \
+        --radiolist "Detected monitors: $OUTPUTS\n\nChoose layout:" 0 0 5 \
+        "extend-right"  "Extend desktop to the right" on \
+        "extend-left"   "Extend desktop to the left" off \
+        "mirror"        "Mirror/clone displays" off \
+        "external-only" "Use external monitor only" off \
+        "internal-only" "Use built-in monitor only" off \
+        2>&1)
+
+    case "$CHOICE" in
+        extend-right)
+            xrandr --output "$PRIMARY" --auto --output "$SECONDARY" --auto --right-of "$PRIMARY"
+            ;;
+        extend-left)
+            xrandr --output "$PRIMARY" --auto --output "$SECONDARY" --auto --left-of "$PRIMARY"
+            ;;
+        mirror)
+            xrandr --output "$PRIMARY" --auto --output "$SECONDARY" --auto --same-as "$PRIMARY"
+            ;;
+        external-only)
+            xrandr --output "$SECONDARY" --auto --output "$PRIMARY" --off
+            ;;
+        internal-only)
+            xrandr --output "$PRIMARY" --auto --output "$SECONDARY" --off
+            ;;
+    esac
+else
+    echo "Multi-Monitor Setup"
+    echo "==================="
+    echo "Detected monitors: $OUTPUTS"
+    echo ""
+    echo "1) Extend right   2) Extend left"
+    echo "3) Mirror/clone   4) External only"
+    echo "5) Internal only"
+    printf "Choice [1]: "
+    read CHOICE
+    case "${CHOICE:-1}" in
+        1) xrandr --output "$PRIMARY" --auto --output "$SECONDARY" --auto --right-of "$PRIMARY" ;;
+        2) xrandr --output "$PRIMARY" --auto --output "$SECONDARY" --auto --left-of "$PRIMARY" ;;
+        3) xrandr --output "$PRIMARY" --auto --output "$SECONDARY" --auto --same-as "$PRIMARY" ;;
+        4) xrandr --output "$SECONDARY" --auto --output "$PRIMARY" --off ;;
+        5) xrandr --output "$PRIMARY" --auto --output "$SECONDARY" --off ;;
+    esac
+fi
+
+echo "Display configuration applied."
+exit 0

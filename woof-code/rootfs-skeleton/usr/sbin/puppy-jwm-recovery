@@ -1,0 +1,67 @@
+#!/bin/sh
+# /usr/sbin/puppy-jwm-recovery
+# JWM window manager crash recovery and restart
+# Addresses: Shell/desktop crash requiring full reboot (Win 95, etc.)
+# Provides safe restart of the window manager without losing X session
+
+case "$1" in
+    restart)
+        # Restart JWM gracefully
+        if pidof jwm >/dev/null 2>&1; then
+            jwm -restart 2>/dev/null
+            echo "JWM restarted successfully"
+        else
+            # JWM not running - start it fresh
+            jwm &
+            echo "JWM started (was not running)"
+        fi
+        ;;
+    reload)
+        # Reload JWM configuration only
+        jwm -reload 2>/dev/null
+        echo "JWM configuration reloaded"
+        ;;
+    fix-menu)
+        # Regenerate the JWM menu from .desktop files
+        if command -v fixmenus >/dev/null 2>&1; then
+            fixmenus
+            echo "Menus regenerated"
+        fi
+        jwm -reload 2>/dev/null
+        echo "JWM menu fixed and reloaded"
+        ;;
+    watchdog)
+        # Run as a watchdog - restart JWM if it dies
+        echo "JWM watchdog starting..."
+        while true; do
+            if [ -n "$DISPLAY" ] && ! pidof jwm >/dev/null 2>&1; then
+                # Check if X is still running
+                if pidof Xorg >/dev/null 2>&1 || pidof X >/dev/null 2>&1; then
+                    echo "JWM crashed - restarting..."
+                    jwm &
+                    # Also regenerate menu in case it was corrupted
+                    sleep 2
+                    command -v fixmenus >/dev/null 2>&1 && fixmenus
+                    jwm -reload 2>/dev/null
+                else
+                    # X is gone, exit watchdog
+                    echo "X server not running, watchdog exiting"
+                    exit 0
+                fi
+            fi
+            sleep 5
+        done
+        ;;
+    *)
+        echo "Puppy Linux Window Manager Recovery"
+        echo ""
+        echo "Usage: $0 {restart|reload|fix-menu|watchdog}"
+        echo ""
+        echo "  restart  - Restart JWM (fixes frozen desktop)"
+        echo "  reload   - Reload JWM config (lighter than restart)"
+        echo "  fix-menu - Regenerate menus and reload"
+        echo "  watchdog - Auto-restart JWM if it crashes"
+        ;;
+esac
+
+exit 0

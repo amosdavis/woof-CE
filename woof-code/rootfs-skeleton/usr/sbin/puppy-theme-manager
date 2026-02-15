@@ -1,0 +1,114 @@
+#!/bin/sh
+# /usr/sbin/puppy-theme-manager
+# Consistent theme management across GTK2, GTK3, and Qt
+# Addresses: Dark mode inconsistency (macOS Mojave, Win 10)
+# Ensures all toolkit applications use the same theme preference
+
+THEME_FILE="/root/.puppy-theme-preference"
+
+get_current_theme() {
+    if [ -f "$THEME_FILE" ]; then
+        cat "$THEME_FILE"
+    else
+        echo "auto"
+    fi
+}
+
+apply_dark_theme() {
+    # GTK2
+    if [ -f /root/.gtkrc-2.0 ]; then
+        sed -i 's/^gtk-theme-name=.*/gtk-theme-name="Raleigh-dark"/' /root/.gtkrc-2.0 2>/dev/null
+    else
+        echo 'gtk-theme-name="Raleigh-dark"' > /root/.gtkrc-2.0
+    fi
+
+    # GTK3
+    mkdir -p /root/.config/gtk-3.0
+    if [ -f /root/.config/gtk-3.0/settings.ini ]; then
+        sed -i 's/^gtk-application-prefer-dark-theme=.*/gtk-application-prefer-dark-theme=1/' /root/.config/gtk-3.0/settings.ini 2>/dev/null
+        if ! grep -q 'gtk-application-prefer-dark-theme' /root/.config/gtk-3.0/settings.ini; then
+            echo 'gtk-application-prefer-dark-theme=1' >> /root/.config/gtk-3.0/settings.ini
+        fi
+    else
+        cat > /root/.config/gtk-3.0/settings.ini << 'EOF'
+[Settings]
+gtk-application-prefer-dark-theme=1
+EOF
+    fi
+
+    # Qt5/Qt6 via environment
+    mkdir -p /root/.config/environment.d
+    echo 'QT_STYLE_OVERRIDE=fusion' > /root/.config/environment.d/theme.conf
+
+    # JWM - set darker tray/window colors
+    if [ -f /root/.jwmrc ]; then
+        # JWM theme is managed by its own theming system
+        echo "Note: JWM theme should be set via the JWM theme chooser"
+    fi
+
+    echo "dark" > "$THEME_FILE"
+    echo "Dark theme applied to GTK2, GTK3, and Qt applications."
+}
+
+apply_light_theme() {
+    # GTK2
+    if [ -f /root/.gtkrc-2.0 ]; then
+        sed -i 's/^gtk-theme-name=.*/gtk-theme-name="Raleigh"/' /root/.gtkrc-2.0 2>/dev/null
+    fi
+
+    # GTK3
+    mkdir -p /root/.config/gtk-3.0
+    if [ -f /root/.config/gtk-3.0/settings.ini ]; then
+        sed -i 's/^gtk-application-prefer-dark-theme=.*/gtk-application-prefer-dark-theme=0/' /root/.config/gtk-3.0/settings.ini 2>/dev/null
+    fi
+
+    # Qt
+    rm -f /root/.config/environment.d/theme.conf 2>/dev/null
+
+    echo "light" > "$THEME_FILE"
+    echo "Light theme applied."
+}
+
+case "$1" in
+    dark)
+        apply_dark_theme
+        ;;
+    light)
+        apply_light_theme
+        ;;
+    toggle)
+        CURRENT=$(get_current_theme)
+        if [ "$CURRENT" = "dark" ]; then
+            apply_light_theme
+        else
+            apply_dark_theme
+        fi
+        ;;
+    status)
+        echo "Current theme preference: $(get_current_theme)"
+        ;;
+    *)
+        if [ -n "$DISPLAY" ] && command -v Xdialog >/dev/null 2>&1; then
+            CHOICE=$(Xdialog --title "Theme Manager" --no-cancel \
+                --radiolist "Choose theme mode:" 0 0 3 \
+                "light" "Light theme" on \
+                "dark"  "Dark theme" off \
+                2>&1)
+            case "$CHOICE" in
+                dark) apply_dark_theme ;;
+                light) apply_light_theme ;;
+            esac
+        else
+            echo "Puppy Linux Theme Manager"
+            echo ""
+            echo "Usage: $0 {dark|light|toggle|status}"
+            echo ""
+            echo "  dark   - Apply dark theme to all toolkits"
+            echo "  light  - Apply light theme to all toolkits"
+            echo "  toggle - Toggle between dark and light"
+            echo "  status - Show current theme"
+        fi
+        ;;
+esac
+
+exit 0

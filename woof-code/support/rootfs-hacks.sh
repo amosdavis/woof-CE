@@ -175,6 +175,12 @@ done
 [ -e ${SR}/usr/sbin/puppy-encrypt-save ] && chmod 755 ${SR}/usr/sbin/puppy-encrypt-save
 [ -e ${SR}/usr/sbin/puppy-update ] && chmod 755 ${SR}/usr/sbin/puppy-update
 
+# Ensure quality/UX tools are executable
+for UXTOOL in puppy-hardware-check puppy-jwm-recovery puppy-memory-watchdog \
+              xrandr-gui puppy-theme-manager puppy-search; do
+	[ -e ${SR}/usr/sbin/$UXTOOL ] && chmod 755 ${SR}/usr/sbin/$UXTOOL
+done
+
 # Ensure D-Bus security policy has correct permissions
 [ -e ${SR}/etc/dbus-1/system.d/puppy-security.conf ] && chmod 644 ${SR}/etc/dbus-1/system.d/puppy-security.conf
 

@@ -1,0 +1,160 @@
+#!/bin/sh
+# /usr/sbin/puppy-hardware-check
+# Boot-time hardware detection and notification for Puppy Linux
+# Detects missing firmware, GPU type, WiFi status, scanners, printers
+# and provides actionable guidance to the user
+
+LOG="/tmp/hardware-check.log"
+ISSUES=""
+
+log_msg() {
+    echo "$1" >> "$LOG" 2>/dev/null
+}
+
+add_issue() {
+    ISSUES="${ISSUES}\n• $1"
+    log_msg "ISSUE: $1"
+}
+
+check_wifi() {
+    log_msg "Checking Wi-Fi..."
+    # Look for wireless interfaces
+    WIFI_COUNT=0
+    for iface in /sys/class/net/wlan* /sys/class/net/wlp*; do
+        [ -e "$iface" ] && WIFI_COUNT=$((WIFI_COUNT+1))
+    done
+
+    if [ $WIFI_COUNT -eq 0 ]; then
+        # Check if there are unclaimed wireless devices (needs firmware)
+        if lspci 2>/dev/null | grep -qi 'network\|wireless\|wifi\|802.11'; then
+            PCI_WIFI=$(lspci 2>/dev/null | grep -i 'network\|wireless\|wifi\|802.11' | head -1)
+            add_issue "Wi-Fi adapter detected but not working: $PCI_WIFI\n  → Try: Menu > System > Puppy Package Manager, search for 'firmware'"
+        fi
+        if lsusb 2>/dev/null | grep -qi 'wireless\|wifi\|802.11\|wlan'; then
+            USB_WIFI=$(lsusb 2>/dev/null | grep -i 'wireless\|wifi\|802.11\|wlan' | head -1)
+            add_issue "USB Wi-Fi adapter detected but no driver loaded: $USB_WIFI"
+        fi
+    else
+        log_msg "Wi-Fi OK: $WIFI_COUNT interface(s) found"
+    fi
+}
+
+check_gpu() {
+    log_msg "Checking GPU..."
+    if lspci 2>/dev/null | grep -qi 'nvidia'; then
+        GPU_MODEL=$(lspci 2>/dev/null | grep -i 'vga\|3d\|display' | grep -i nvidia | head -1 | sed 's/.*: //')
+        if [ ! -e /dev/nvidia0 ] && ! lsmod 2>/dev/null | grep -q '^nvidia'; then
+            # Using nouveau (open source driver)
+            if lsmod 2>/dev/null | grep -q '^nouveau'; then
+                log_msg "NVIDIA GPU using nouveau driver (open source): $GPU_MODEL"
+            else
+                add_issue "NVIDIA GPU detected but no driver loaded: $GPU_MODEL\n  → The open-source 'nouveau' driver should load automatically\n  → For better performance, install proprietary NVIDIA drivers"
+            fi
+        else
+            log_msg "NVIDIA proprietary driver loaded"
+        fi
+    fi
+
+    if lspci 2>/dev/null | grep -qi 'amd.*radeon\|ati.*radeon'; then
+        if ! lsmod 2>/dev/null | grep -q 'amdgpu\|radeon'; then
+            GPU_MODEL=$(lspci 2>/dev/null | grep -i 'vga\|3d\|display' | grep -i 'amd\|ati' | head -1 | sed 's/.*: //')
+            add_issue "AMD GPU detected but no driver loaded: $GPU_MODEL\n  → The 'amdgpu' or 'radeon' kernel module may need firmware"
+        fi
+    fi
+}
+
+check_firmware() {
+    log_msg "Checking firmware requests..."
+    # Check dmesg for firmware loading failures
+    FW_FAILS=$(dmesg 2>/dev/null | grep -i 'firmware.*failed\|firmware.*not found\|Direct firmware load.*failed' | sort -u)
+    if [ -n "$FW_FAILS" ]; then
+        FW_LIST=$(echo "$FW_FAILS" | grep -oP 'firmware[: ]+\K[^ ]+' | sort -u | head -5)
+        if [ -n "$FW_LIST" ]; then
+            add_issue "Missing firmware files detected:\n$(echo "$FW_LIST" | sed 's/^/    /')\n  → Install linux-firmware package for better hardware support"
+        fi
+    fi
+}
+
+check_audio() {
+    log_msg "Checking audio..."
+    if [ ! -e /dev/snd/controlC0 ] && [ ! -c /dev/mixer ]; then
+        if lspci 2>/dev/null | grep -qi 'audio\|sound\|multimedia'; then
+            AUDIO_DEV=$(lspci 2>/dev/null | grep -i 'audio\|sound\|multimedia' | head -1 | sed 's/.*: //')
+            add_issue "Sound card detected but audio not working: $AUDIO_DEV\n  → Try: Menu > Multimedia > ALSA Sound Wizard"
+        fi
+    else
+        log_msg "Audio OK"
+    fi
+}
+
+check_printer() {
+    log_msg "Checking printers..."
+    if command -v lpstat >/dev/null 2>&1; then
+        if ! lpstat -p 2>/dev/null | grep -q .; then
+            if lsusb 2>/dev/null | grep -qi 'printer\|print'; then
+                PRINTER=$(lsusb 2>/dev/null | grep -i 'printer\|print' | head -1)
+                add_issue "USB printer connected but not configured: $PRINTER\n  → Try: Menu > System > CUPS Printer Wizard"
+            fi
+        fi
+    fi
+}
+
+check_scanner() {
+    log_msg "Checking scanners..."
+    if lsusb 2>/dev/null | grep -qi 'scanner\|scan'; then
+        SCANNER=$(lsusb 2>/dev/null | grep -i 'scanner\|scan' | head -1)
+        if command -v scanimage >/dev/null 2>&1; then
+            if ! scanimage -L 2>/dev/null | grep -q 'device'; then
+                add_issue "USB scanner connected but not detected by SANE: $SCANNER\n  → Install SANE backends: pkg install sane-backends"
+            fi
+        else
+            add_issue "USB scanner detected but SANE not installed: $SCANNER\n  → Install SANE: Menu > Setup > Puppy Package Manager, search 'sane'"
+        fi
+    fi
+}
+
+check_display() {
+    log_msg "Checking display..."
+    if command -v xrandr >/dev/null 2>&1 && [ -n "$DISPLAY" ]; then
+        MONITOR_COUNT=$(xrandr --query 2>/dev/null | grep ' connected' | wc -l)
+        if [ "$MONITOR_COUNT" -gt 1 ]; then
+            log_msg "Multiple monitors detected ($MONITOR_COUNT)"
+            # Check if all are active
+            ACTIVE_COUNT=$(xrandr --query 2>/dev/null | grep ' connected' | grep -c '[0-9]x[0-9]')
+            if [ "$ACTIVE_COUNT" -lt "$MONITOR_COUNT" ]; then
+                add_issue "Multiple monitors detected but not all active ($ACTIVE_COUNT/$MONITOR_COUNT)\n  → Try: Menu > Desktop > Monitor Setup (xrandr)"
+            fi
+        fi
+    fi
+}
+
+# Main
+echo "Puppy Linux Hardware Check" > "$LOG"
+echo "$(date)" >> "$LOG"
+echo "=========================" >> "$LOG"
+
+check_firmware
+check_wifi
+check_gpu
+check_audio
+check_printer
+check_scanner
+check_display
+
+if [ -n "$ISSUES" ]; then
+    log_msg ""
+    log_msg "=== Hardware issues found ==="
+
+    # Show notification if X is running
+    if [ -n "$DISPLAY" ] && command -v Xdialog >/dev/null 2>&1; then
+        Xdialog --title "Hardware Check" --left --msgbox \
+            "Puppy Linux detected some hardware that may need attention:\n${ISSUES}\n\nYou can re-run this check anytime:\nMenu > System > Hardware Check" \
+            0 0 2>/dev/null &
+    elif [ -n "$DISPLAY" ] && command -v gxmessage >/dev/null 2>&1; then
+        echo -e "Hardware issues detected:\n${ISSUES}" | gxmessage -file - -title "Hardware Check" &
+    fi
+else
+    log_msg "All detected hardware appears to be working."
+fi
+
+exit 0

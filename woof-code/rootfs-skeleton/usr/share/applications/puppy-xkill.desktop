@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Kill Frozen Window
+Comment=Click on a frozen window to force-close it
+Exec=xkill
+Icon=process-stop
+Categories=System;
+Terminal=false

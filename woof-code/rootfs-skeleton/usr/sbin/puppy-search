@@ -1,0 +1,73 @@
+#!/bin/sh
+# /usr/sbin/puppy-search
+# Fast file search tool for Puppy Linux
+# Addresses: Search that is slow and rarely finds what users need (Win XP, Win 10)
+# Works offline, uses locate database when available, falls back to find
+
+SEARCH_TERM="$1"
+
+# GUI mode if no argument and X is available
+if [ -z "$SEARCH_TERM" ] && [ -n "$DISPLAY" ]; then
+    if command -v Xdialog >/dev/null 2>&1; then
+        SEARCH_TERM=$(Xdialog --title "Puppy Search" --inputbox "Search for files:" 0 0 2>&1)
+        [ $? -ne 0 ] && exit 0
+    else
+        echo "Usage: $0 <search-term>"
+        exit 1
+    fi
+fi
+
+if [ -z "$SEARCH_TERM" ]; then
+    echo "Usage: $0 <search-term>"
+    echo ""
+    echo "Fast file search across the system."
+    echo "Searches filenames and optionally file contents."
+    exit 1
+fi
+
+search_files() {
+    # First try locate (fastest)
+    if command -v locate >/dev/null 2>&1 && [ -f /var/lib/mlocate/mlocate.db -o -f /var/lib/plocate/plocate.db ]; then
+        locate -i "$SEARCH_TERM" 2>/dev/null
+        return
+    fi
+
+    # Fall back to find (works everywhere)
+    find / -name "*${SEARCH_TERM}*" -not -path '/proc/*' -not -path '/sys/*' -not -path '/dev/*' 2>/dev/null
+}
+
+if [ -n "$DISPLAY" ] && command -v Xdialog >/dev/null 2>&1; then
+    # GUI mode - show results in a list
+    RESULTS=$(search_files | head -100)
+    if [ -z "$RESULTS" ]; then
+        Xdialog --title "Search Results" --msgbox "No files found matching '$SEARCH_TERM'" 0 0 2>/dev/null
+    else
+        RESULT_COUNT=$(echo "$RESULTS" | wc -l)
+        SELECTED=$(echo "$RESULTS" | Xdialog --title "Search Results ($RESULT_COUNT found)" \
+            --no-cancel --fselect "/root" 0 0 2>&1)
+        if [ -n "$SELECTED" ] && [ -e "$SELECTED" ]; then
+            if [ -d "$SELECTED" ]; then
+                # Open directory in file manager
+                command -v rox >/dev/null 2>&1 && rox "$SELECTED" || xdg-open "$SELECTED"
+            else
+                # Open file's parent directory and select file
+                PARENT_DIR=$(dirname "$SELECTED")
+                command -v rox >/dev/null 2>&1 && rox "$PARENT_DIR" || xdg-open "$PARENT_DIR"
+            fi
+        fi
+    fi
+else
+    # CLI mode
+    echo "Searching for '$SEARCH_TERM'..."
+    echo "================================"
+    RESULTS=$(search_files)
+    if [ -z "$RESULTS" ]; then
+        echo "No files found."
+    else
+        echo "$RESULTS" | head -50
+        TOTAL=$(echo "$RESULTS" | wc -l)
+        [ "$TOTAL" -gt 50 ] && echo "... ($TOTAL total results, showing first 50)"
+    fi
+fi
+
+exit 0

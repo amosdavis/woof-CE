@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Restart Desktop
+Comment=Restart the window manager without rebooting
+Exec=puppy-jwm-recovery restart
+Icon=desktop
+Categories=System;
+Terminal=false

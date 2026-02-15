@@ -1,0 +1,118 @@
+#!/bin/sh
+# /usr/sbin/puppy-memory-watchdog
+# Lightweight memory monitoring daemon
+# Addresses: System slowing dramatically over time (Win 95/98 GDI leaks,
+# macOS memory leaks, Linux OOM), hung process management
+# Warns user before OOM killer activates
+
+WARN_THRESHOLD=90   # Percent memory used to trigger warning
+CRIT_THRESHOLD=95   # Percent memory used to trigger critical alert
+CHECK_INTERVAL=30   # Seconds between checks
+WARNED=0
+
+get_mem_percent() {
+    # Parse /proc/meminfo for memory usage percentage
+    TOTAL=$(grep '^MemTotal:' /proc/meminfo | awk '{print $2}')
+    AVAIL=$(grep '^MemAvailable:' /proc/meminfo | awk '{print $2}')
+    if [ -z "$AVAIL" ]; then
+        # Older kernels don't have MemAvailable
+        FREE=$(grep '^MemFree:' /proc/meminfo | awk '{print $2}')
+        BUFFERS=$(grep '^Buffers:' /proc/meminfo | awk '{print $2}')
+        CACHED=$(grep '^Cached:' /proc/meminfo | awk '{print $2}')
+        AVAIL=$((FREE + BUFFERS + CACHED))
+    fi
+    USED=$((TOTAL - AVAIL))
+    echo $((USED * 100 / TOTAL))
+}
+
+get_top_processes() {
+    # Show top 5 memory-consuming processes
+    ps -eo pid,rss,comm --sort=-rss 2>/dev/null | head -6 | \
+        awk 'NR>1 {printf "  %s: %d MB\n", $3, $2/1024}'
+}
+
+show_warning() {
+    MSG="$1"
+    PROCS=$(get_top_processes)
+
+    if [ -n "$DISPLAY" ] && command -v Xdialog >/dev/null 2>&1; then
+        Xdialog --title "Memory Warning" --left --ok-label "OK" \
+            --cancel-label "Kill Top Process" \
+            --yesno "${MSG}\n\nTop memory users:\n${PROCS}\n\nClose some applications to free memory.\nClick 'Kill Top Process' to force-close the biggest one." \
+            0 0 2>/dev/null
+        if [ $? -eq 1 ]; then
+            # Kill top process (skip PID 1 and kernel threads)
+            TOP_PID=$(ps -eo pid,rss --sort=-rss 2>/dev/null | awk 'NR==2 {print $1}')
+            if [ -n "$TOP_PID" ] && [ "$TOP_PID" -gt 1 ]; then
+                kill "$TOP_PID" 2>/dev/null
+                sleep 2
+                # Force kill if still running
+                kill -0 "$TOP_PID" 2>/dev/null && kill -9 "$TOP_PID" 2>/dev/null
+            fi
+        fi
+    fi
+}
+
+case "$1" in
+    start)
+        echo "Memory watchdog starting (warn at ${WARN_THRESHOLD}%, critical at ${CRIT_THRESHOLD}%)"
+        while true; do
+            MEM_PCT=$(get_mem_percent)
+
+            if [ "$MEM_PCT" -ge "$CRIT_THRESHOLD" ]; then
+                show_warning "CRITICAL: Memory usage is at ${MEM_PCT}%!\nSystem may become unresponsive."
+                WARNED=2
+
+                # Emergency: drop caches to buy time
+                sync
+                echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+
+            elif [ "$MEM_PCT" -ge "$WARN_THRESHOLD" ] && [ "$WARNED" -lt 1 ]; then
+                show_warning "WARNING: Memory usage is at ${MEM_PCT}%.\nSystem may slow down."
+                WARNED=1
+
+            elif [ "$MEM_PCT" -lt "$WARN_THRESHOLD" ]; then
+                WARNED=0
+            fi
+
+            sleep $CHECK_INTERVAL
+        done
+        ;;
+    status)
+        MEM_PCT=$(get_mem_percent)
+        TOTAL_MB=$(($(grep '^MemTotal:' /proc/meminfo | awk '{print $2}') / 1024))
+        AVAIL_MB=$(($(grep '^MemAvailable:' /proc/meminfo | awk '{print $2}') / 1024))
+        echo "Memory: ${MEM_PCT}% used (${AVAIL_MB}MB free of ${TOTAL_MB}MB)"
+        echo ""
+        echo "Top memory consumers:"
+        get_top_processes
+        ;;
+    kill)
+        # Interactive process killer
+        if [ -n "$DISPLAY" ] && command -v xkill >/dev/null 2>&1; then
+            echo "Click on the window you want to force-close..."
+            xkill
+        else
+            echo "Running processes by memory usage:"
+            ps -eo pid,rss,comm --sort=-rss 2>/dev/null | head -20 | \
+                awk 'NR==1 {print $0} NR>1 {printf "%7s %6d MB  %s\n", $1, $2/1024, $3}'
+            echo ""
+            printf "Enter PID to kill (or 'q' to quit): "
+            read KILL_PID
+            if [ "$KILL_PID" != "q" ] && [ -n "$KILL_PID" ]; then
+                kill "$KILL_PID" 2>/dev/null && echo "Sent SIGTERM to $KILL_PID" || echo "Failed to kill $KILL_PID"
+            fi
+        fi
+        ;;
+    *)
+        echo "Puppy Linux Memory Watchdog"
+        echo ""
+        echo "Usage: $0 {start|status|kill}"
+        echo ""
+        echo "  start  - Run memory monitoring daemon"
+        echo "  status - Show current memory usage"
+        echo "  kill   - Interactive process killer (xkill or CLI)"
+        ;;
+esac
+
+exit 0

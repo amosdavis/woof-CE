@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Memory Status
+Comment=View memory usage and manage processes
+Exec=puppy-memory-watchdog status
+Icon=utilities-system-monitor
+Categories=System;
+Terminal=true

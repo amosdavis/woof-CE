@@ -191,6 +191,15 @@ if [ "$CURRENTWM" != "jwm" -a "$CURRENTWM" != "icewm" ];then
  [ "$desktop" = "rox" ] && [ -f /usr/bin/lxpanel ] && lxpanel &
 fi
 
+# Start JWM watchdog to auto-restart if window manager crashes
+# Addresses: Shell/desktop crash requiring full reboot (Win 95, etc.)
+if [ "$CURRENTWM" = "jwm" ] && [ -x /usr/sbin/puppy-jwm-recovery ]; then
+  puppy-jwm-recovery watchdog &
+fi
+
+# Start memory watchdog in background
+[ -x /usr/sbin/puppy-memory-watchdog ] && puppy-memory-watchdog start &
+
 which $CURRENTWM && exec $CURRENTWM
 [ -x $CURRENTWM ] && exec $CURRENTWM
 [ "$desktop" = "rox" ] && exec jwm

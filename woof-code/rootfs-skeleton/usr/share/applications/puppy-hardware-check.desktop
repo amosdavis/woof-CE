@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Hardware Check
+Comment=Check hardware status and detect missing drivers
+Exec=puppy-hardware-check
+Icon=hwinfo
+Categories=System;
+Terminal=false

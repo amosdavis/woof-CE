@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Monitor Setup
+Comment=Configure display resolution and multi-monitor layout
+Exec=xrandr-gui
+Icon=display
+Categories=System;Settings;HardwareSettings;
+Terminal=false
