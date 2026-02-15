@@ -1,0 +1,228 @@
+#!/bin/sh
+# /usr/sbin/puppy-encrypt-save
+# Encrypted save file support for Puppy Linux
+# Creates and manages LUKS-encrypted pup_save files
+
+PROG="$(basename $0)"
+
+usage() {
+    echo "Usage: $PROG {create|open|close|status}"
+    echo ""
+    echo "  create  - Create a new encrypted save file"
+    echo "  open    - Open (unlock) an encrypted save file"
+    echo "  close   - Close (lock) an encrypted save file"
+    echo "  status  - Show encryption status"
+    echo ""
+    echo "This tool creates LUKS-encrypted persistent storage for Puppy Linux."
+    echo "Your data is protected with AES-256 encryption."
+}
+
+check_luks_tools() {
+    if ! command -v cryptsetup >/dev/null 2>&1; then
+        echo "ERROR: cryptsetup is required but not installed."
+        echo "Install it with: pkg -i cryptsetup"
+        exit 1
+    fi
+}
+
+create_encrypted_save() {
+    check_luks_tools
+
+    # Determine save location
+    . /etc/rc.d/PUPSTATE 2>/dev/null
+    SAVEPATH="${PDEV1_MP:-/mnt/home}"
+
+    if [ ! -d "$SAVEPATH" ]; then
+        echo "ERROR: Save partition not found at $SAVEPATH"
+        exit 1
+    fi
+
+    # Get desired size
+    echo "=== Encrypted Save File Creation ==="
+    echo ""
+    echo "Location: $SAVEPATH"
+    echo ""
+
+    if command -v Xdialog >/dev/null 2>&1 && [ -n "$DISPLAY" ]; then
+        SIZE_MB=$(Xdialog --title "Encrypted Save" --inputbox \
+            "Enter size in MB for encrypted save file\n(minimum 256, recommended 1024):" \
+            10 50 "1024" 2>&1)
+        [ $? -ne 0 ] && exit 0
+    else
+        printf "Enter size in MB (min 256, default 1024): "
+        read SIZE_MB
+        [ -z "$SIZE_MB" ] && SIZE_MB=1024
+    fi
+
+    if [ "$SIZE_MB" -lt 256 ] 2>/dev/null; then
+        echo "ERROR: Minimum size is 256 MB"
+        exit 1
+    fi
+
+    SAVEFILE="$SAVEPATH/puppy_save_encrypted.4fs"
+    if [ -f "$SAVEFILE" ]; then
+        echo "ERROR: Encrypted save file already exists at $SAVEFILE"
+        exit 1
+    fi
+
+    echo "Creating ${SIZE_MB}MB encrypted save file..."
+
+    # Create sparse file
+    dd if=/dev/zero of="$SAVEFILE" bs=1M count=0 seek="$SIZE_MB" 2>/dev/null
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to create save file"
+        rm -f "$SAVEFILE"
+        exit 1
+    fi
+
+    # Set up loop device
+    LOOPDEV=$(losetup -f)
+    losetup "$LOOPDEV" "$SAVEFILE"
+
+    # Format with LUKS
+    echo ""
+    echo "You will be asked to set an encryption password."
+    echo "Use a strong password - this protects ALL your saved data."
+    echo ""
+
+    cryptsetup luksFormat --type luks2 \
+        --cipher aes-xts-plain64 \
+        --key-size 512 \
+        --hash sha512 \
+        --iter-time 5000 \
+        --pbkdf argon2id \
+        "$LOOPDEV"
+
+    if [ $? -ne 0 ]; then
+        echo "ERROR: LUKS formatting failed"
+        losetup -d "$LOOPDEV"
+        rm -f "$SAVEFILE"
+        exit 1
+    fi
+
+    # Open and format ext4
+    cryptsetup open "$LOOPDEV" puppy_crypt
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to open encrypted volume"
+        losetup -d "$LOOPDEV"
+        exit 1
+    fi
+
+    mkfs.ext4 -L "puppy_save" /dev/mapper/puppy_crypt
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to format filesystem"
+        cryptsetup close puppy_crypt
+        losetup -d "$LOOPDEV"
+        rm -f "$SAVEFILE"
+        exit 1
+    fi
+
+    # Close everything
+    cryptsetup close puppy_crypt
+    losetup -d "$LOOPDEV"
+
+    echo ""
+    echo "SUCCESS: Encrypted save file created at $SAVEFILE"
+    echo "Size: ${SIZE_MB}MB"
+    echo "Encryption: AES-256-XTS with Argon2id KDF"
+    echo ""
+    echo "To use this save file, you will be prompted for your password at boot."
+}
+
+open_encrypted_save() {
+    check_luks_tools
+
+    . /etc/rc.d/PUPSTATE 2>/dev/null
+    SAVEPATH="${PDEV1_MP:-/mnt/home}"
+    SAVEFILE="$SAVEPATH/puppy_save_encrypted.4fs"
+
+    if [ ! -f "$SAVEFILE" ]; then
+        echo "No encrypted save file found at $SAVEFILE"
+        exit 1
+    fi
+
+    if [ -e /dev/mapper/puppy_crypt ]; then
+        echo "Encrypted save is already open"
+        exit 0
+    fi
+
+    LOOPDEV=$(losetup -f)
+    losetup "$LOOPDEV" "$SAVEFILE"
+    cryptsetup open "$LOOPDEV" puppy_crypt
+
+    if [ $? -eq 0 ]; then
+        echo "Encrypted save opened successfully"
+        mount /dev/mapper/puppy_crypt /mnt/secure 2>/dev/null || \
+            echo "Volume opened at /dev/mapper/puppy_crypt - mount manually if needed"
+    else
+        losetup -d "$LOOPDEV"
+        echo "Failed to open encrypted save"
+        exit 1
+    fi
+}
+
+close_encrypted_save() {
+    check_luks_tools
+
+    if [ ! -e /dev/mapper/puppy_crypt ]; then
+        echo "No encrypted save is currently open"
+        exit 0
+    fi
+
+    # Find and sync any mounts
+    MOUNTPOINT=$(mount | grep '/dev/mapper/puppy_crypt' | awk '{print $3}')
+    if [ -n "$MOUNTPOINT" ]; then
+        sync
+        umount "$MOUNTPOINT" 2>/dev/null
+    fi
+
+    cryptsetup close puppy_crypt
+
+    # Clean up loop device
+    for loop in /dev/loop*; do
+        if losetup "$loop" 2>/dev/null | grep -q 'puppy_save_encrypted'; then
+            losetup -d "$loop" 2>/dev/null
+        fi
+    done
+
+    echo "Encrypted save closed and locked"
+}
+
+show_status() {
+    . /etc/rc.d/PUPSTATE 2>/dev/null
+    SAVEPATH="${PDEV1_MP:-/mnt/home}"
+    SAVEFILE="$SAVEPATH/puppy_save_encrypted.4fs"
+
+    echo "=== Puppy Linux Encryption Status ==="
+    echo ""
+
+    if [ -f "$SAVEFILE" ]; then
+        SIZE=$(du -h "$SAVEFILE" 2>/dev/null | cut -f1)
+        echo "Encrypted save file: $SAVEFILE ($SIZE)"
+
+        if command -v cryptsetup >/dev/null 2>&1; then
+            LOOPDEV=$(losetup -j "$SAVEFILE" 2>/dev/null | cut -d: -f1)
+            if [ -n "$LOOPDEV" ]; then
+                echo "Loop device: $LOOPDEV"
+                cryptsetup status puppy_crypt 2>/dev/null
+            else
+                echo "Status: LOCKED (not mounted)"
+            fi
+        else
+            echo "cryptsetup not installed - cannot check status"
+        fi
+    else
+        echo "No encrypted save file found"
+        echo "Run '$PROG create' to create one"
+    fi
+}
+
+case "$1" in
+    create) create_encrypted_save ;;
+    open)   open_encrypted_save ;;
+    close)  close_encrypted_save ;;
+    status) show_status ;;
+    *)      usage ;;
+esac
+
+exit 0

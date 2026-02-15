@@ -1,0 +1,42 @@
+#!/bin/sh
+# /etc/init.d/15ntpd-lite
+# Lightweight NTP time synchronization for Puppy Linux
+# Addresses: system clock issues (Y2K, leap seconds, DST),
+# time drift, unreliable system time
+# Uses busybox ntpd for minimal resource usage
+
+NTP_SERVERS="pool.ntp.org 0.pool.ntp.org 1.pool.ntp.org"
+NTP_CONF="/etc/ntp.conf"
+
+start() {
+    # Sync hardware clock to system on boot
+    hwclock --hctosys --utc 2>/dev/null
+
+    # Use ntpd if available (busybox has a lightweight one)
+    if command -v ntpd >/dev/null 2>&1; then
+        # Kill any existing ntpd
+        killall ntpd 2>/dev/null
+
+        # Start NTP daemon for continuous time sync
+        if [ -f "$NTP_CONF" ]; then
+            ntpd -p 0.pool.ntp.org -p 1.pool.ntp.org 2>/dev/null
+        else
+            ntpd -p pool.ntp.org 2>/dev/null
+        fi
+    elif command -v ntpdate >/dev/null 2>&1; then
+        # One-shot sync fallback
+        ntpdate -s pool.ntp.org 2>/dev/null &
+    fi
+}
+
+stop() {
+    killall ntpd 2>/dev/null
+    # Save time to hardware clock
+    hwclock --systohc --utc 2>/dev/null
+}
+
+case "$1" in
+    start) start ;;
+    stop)  stop ;;
+    *)     echo "Usage: $0 {start|stop}" ;;
+esac

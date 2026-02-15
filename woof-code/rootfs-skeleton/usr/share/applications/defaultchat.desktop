@@ -3,5 +3,5 @@ Encoding=UTF-8
 Type=Application
 NoDisplay=true
 Name=Default chat
-Exec=defaultchat
+Exec=run-as-spot defaultchat
 Icon=/usr/share/pixmaps/puppy/chat.svg

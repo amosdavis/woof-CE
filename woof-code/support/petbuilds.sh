@@ -11,9 +11,9 @@ fi
 WOOF_CC="/usr/bin/ccache gcc"
 WOOF_CXX="/usr/bin/ccache g++"
 
-WOOF_CFLAGS="$WOOF_CFLAGS -O2 -fomit-frame-pointer -ffunction-sections -fdata-sections -fmerge-all-constants"
-WOOF_CXXFLAGS="$WOOF_CXXFLAGS -O2 -fomit-frame-pointer -ffunction-sections -fdata-sections -fmerge-all-constants"
-WOOF_LDFLAGS="$WOOF_LDFLAGS -Wl,--gc-sections -Wl,--sort-common -Wl,-s"
+WOOF_CFLAGS="$WOOF_CFLAGS -O2 -fomit-frame-pointer -ffunction-sections -fdata-sections -fmerge-all-constants -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -Wformat -Wformat-security"
+WOOF_CXXFLAGS="$WOOF_CXXFLAGS -O2 -fomit-frame-pointer -ffunction-sections -fdata-sections -fmerge-all-constants -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -Wformat -Wformat-security"
+WOOF_LDFLAGS="$WOOF_LDFLAGS -Wl,--gc-sections -Wl,--sort-common -Wl,-s -Wl,-z,relro -Wl,-z,now -pie"
 
 MAKEFLAGS=-j`nproc`
 
@@ -178,9 +178,15 @@ EOF
         if [ -f ${HERE}/../rootfs-petbuilds/${NAME}/sha256.sum ]; then
             sha256sum -c ${HERE}/../rootfs-petbuilds/${NAME}/sha256.sum
             if [ $? -ne 0 ]; then
+                echo "ERROR: SHA256 checksum verification FAILED for ${NAME}"
+                echo "ERROR: Downloaded files may be corrupted or tampered with"
                 rm -f ../petbuild-sources/${NAME}/* 2>/dev/null
                 exit 1
             fi
+        else
+            echo "WARNING: No sha256.sum file for ${NAME} - download integrity NOT verified"
+            echo "WARNING: Add sha256.sum to rootfs-petbuilds/${NAME}/ for supply chain security"
+            [ -n "$GITHUB_ACTIONS" ] && echo "::warning::No sha256.sum for petbuild ${NAME}"
         fi
 
         echo "Building ${NAME}"

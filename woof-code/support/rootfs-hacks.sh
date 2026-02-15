@@ -130,8 +130,60 @@ done
 [ -e ${SR}/etc/shadow ]  && chmod 600 ${SR}/etc/shadow
 [ -e ${SR}/etc/sudoers ] && chmod 640 ${SR}/etc/sudoers
 [ -e ${SR}/tmp ] && chmod 1777 ${SR}/tmp
-[ -e ${SR}/var ] && chmod 777 ${SR}/var
+[ -e ${SR}/var ] && chmod 755 ${SR}/var
+[ -e ${SR}/var/tmp ] && chmod 1777 ${SR}/var/tmp
 [ -e ${SR}/var/local ] && chmod 1777 ${SR}/var/local
+[ -e ${SR}/root ] && chmod 700 ${SR}/root
+[ -e ${SR}/home/spot ] && chmod 700 ${SR}/home/spot
+
+# Harden sysctl configuration
+if [ -d ${SR}/etc/sysctl.d ]; then
+	chmod 600 ${SR}/etc/sysctl.d/*.conf 2>/dev/null
+fi
+
+# Install firewall and make it executable (starts on boot)
+if [ -e ${SR}/etc/rc.d/rc.firewall ]; then
+	chmod 755 ${SR}/etc/rc.d/rc.firewall
+fi
+
+# Install bluetooth hardening if BlueZ is present
+if [ -d ${SR}/etc/bluetooth ] && [ -e ${SR}/etc/bluetooth/main.conf.puppy ]; then
+	if [ ! -e ${SR}/etc/bluetooth/main.conf ] || ! grep -q 'Discoverable = false' ${SR}/etc/bluetooth/main.conf 2>/dev/null; then
+		cp -f ${SR}/etc/bluetooth/main.conf.puppy ${SR}/etc/bluetooth/main.conf
+	fi
+fi
+
+# SSH hardening - restrict key permissions
+if [ -d ${SR}/etc/ssh ]; then
+	chmod 600 ${SR}/etc/ssh/sshd_config 2>/dev/null
+	chmod 644 ${SR}/etc/ssh/ssh_config 2>/dev/null
+	chmod 644 ${SR}/etc/ssh/banner 2>/dev/null
+fi
+
+# Ensure security profile scripts are executable
+[ -d ${SR}/etc/profile.d ] && chmod 755 ${SR}/etc/profile.d/*.sh 2>/dev/null
+
+# Ensure custom init.d service scripts are executable
+for INITSCRIPT in ${SR}/etc/init.d/11alsa-save-restore ${SR}/etc/init.d/15ntpd-lite ${SR}/etc/init.d/20cups-autoconfig; do
+	[ -e "$INITSCRIPT" ] && chmod 755 "$INITSCRIPT"
+done
+
+# Ensure first-boot security wizard is executable
+[ -e ${SR}/usr/sbin/puppy-firstboot-security ] && chmod 755 ${SR}/usr/sbin/puppy-firstboot-security
+
+# Ensure encrypted save and update tools are executable
+[ -e ${SR}/usr/sbin/puppy-encrypt-save ] && chmod 755 ${SR}/usr/sbin/puppy-encrypt-save
+[ -e ${SR}/usr/sbin/puppy-update ] && chmod 755 ${SR}/usr/sbin/puppy-update
+
+# Ensure D-Bus security policy has correct permissions
+[ -e ${SR}/etc/dbus-1/system.d/puppy-security.conf ] && chmod 644 ${SR}/etc/dbus-1/system.d/puppy-security.conf
+
+# Audit and minimize SUID binaries (prevent privilege escalation)
+for SUID_BIN in ${SR}/usr/bin/chage ${SR}/usr/bin/chfn ${SR}/usr/bin/chsh ${SR}/usr/bin/expiry ${SR}/usr/bin/wall ${SR}/usr/bin/write; do
+	if [ -u "$SUID_BIN" ] 2>/dev/null; then
+		chmod u-s "$SUID_BIN"
+	fi
+done
 
 # ensure application_x-bittorrent is assigned to defaulttorrent..
 if [ -f ${SR}/etc/xdg/rox.sourceforge.net/MIME-types/application_x-bittorrent ] ; then
@@ -171,14 +223,14 @@ if [ -f ${SR}/usr/bin/Xorg ] && [ ! -L ${SR}/usr/bin/X ] ; then
 	ln -snfv Xorg ${SR}/usr/bin/X
 fi
 
-# need a working wget
+# wget certificate handling - NEVER disable validation
+# If ca-certificates is missing, warn loudly but do NOT disable checking
 if [ -f ${SR}/etc/wgetrc -a ! -f ${SR}/etc/ssl/certs/ca-certificates.crt ] ; then
-	if ! grep -q "check_certificate = off" ${SR}/etc/wgetrc ; then
-		echo "WARNING: disabling wget certificate validation"
-		echo "check_certificate = off
-	#ca_certificate = /etc/ssl/certs/ca-certificates.crt
-	continue = on" >> ${SR}/etc/wgetrc
-	fi
+	echo "WARNING: ca-certificates not found! wget HTTPS will fail without certificates."
+	echo "WARNING: Install ca-certificates package for secure downloads."
+	echo "# WARNING: ca-certificates not installed - HTTPS connections may fail" >> ${SR}/etc/wgetrc
+	echo "# Install ca-certificates package to fix this" >> ${SR}/etc/wgetrc
+	echo "continue = on" >> ${SR}/etc/wgetrc
 fi
 
 # fix some apps to work without root

@@ -1,0 +1,52 @@
+#!/bin/sh
+# /etc/init.d/20cups-autoconfig
+# Auto-configure CUPS printing on Puppy Linux
+# Detects USB and network printers and adds them automatically
+
+case "$1" in
+  start)
+    # Only run if CUPS is installed
+    [ -x /usr/sbin/cupsd ] || exit 0
+
+    # Start CUPS if not running
+    if ! pidof cupsd >/dev/null 2>&1; then
+      /usr/sbin/cupsd
+      sleep 1
+    fi
+
+    # Enable browsing to find shared printers
+    if [ -f /etc/cups/cupsd.conf ]; then
+      if ! grep -q '^Browsing On' /etc/cups/cupsd.conf 2>/dev/null; then
+        sed -i 's/^Browsing .*/Browsing On/' /etc/cups/cupsd.conf 2>/dev/null
+      fi
+    fi
+
+    # Auto-detect USB printers if lpinfo is available
+    if command -v lpinfo >/dev/null 2>&1; then
+      # Find USB printers not yet configured
+      for URI in $(lpinfo -v 2>/dev/null | grep '^direct usb:' | awk '{print $2}'); do
+        PRINTER_NAME="USB_Printer_$(echo "$URI" | md5sum | cut -c1-8)"
+        # Only add if no printers are configured yet
+        if ! lpstat -p 2>/dev/null | grep -q .; then
+          # Detect driver
+          DRIVER=$(lpinfo --make-and-model "$(lpinfo -v 2>/dev/null | grep "$URI" | head -1)" -m 2>/dev/null | head -1 | awk '{print $1}')
+          if [ -z "$DRIVER" ]; then
+            DRIVER="everywhere"
+          fi
+          lpadmin -p "$PRINTER_NAME" -E -v "$URI" -m "$DRIVER" 2>/dev/null
+          lpadmin -d "$PRINTER_NAME" 2>/dev/null
+          echo "CUPS: Auto-configured printer $PRINTER_NAME"
+        fi
+      done
+    fi
+    ;;
+  stop)
+    # CUPS daemon is managed separately
+    ;;
+  *)
+    echo "Usage: $0 {start|stop}"
+    exit 1
+    ;;
+esac
+
+exit 0

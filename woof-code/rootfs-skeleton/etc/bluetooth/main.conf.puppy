@@ -1,0 +1,39 @@
+# /etc/bluetooth/main.conf.puppy - Hardened Bluetooth Defaults
+# Addresses: BlueBorne, BLESA, pairing attacks, discoverability attacks
+# Copied to /etc/bluetooth/main.conf by rootfs-hacks.sh if BlueZ is installed
+
+[General]
+# Not discoverable by default (prevents BlueBorne-style scanning attacks)
+DiscoverableTimeout = 0
+Discoverable = false
+
+# Require authentication for all pairing
+PairableTimeout = 120
+Pairable = true
+
+# Device name
+Name = Puppy
+
+# Device class (computer)
+Class = 0x000100
+
+# Prefer Secure Simple Pairing
+JustWorksRepairing = confirm
+
+# Controller mode
+ControllerMode = dual
+FastConnectable = false
+
+# Privacy features
+Privacy = device
+
+[Policy]
+# Auto-enable adapters but keep not-discoverable
+AutoEnable = true
+
+# Reconnect attempts
+ReconnectAttempts = 7
+ReconnectIntervals = 1,2,4,8,16,32,64
+
+[GATT]
+Cache = always

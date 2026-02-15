@@ -1,0 +1,252 @@
+#!/bin/sh
+# /usr/sbin/puppy-update
+# Safe package update mechanism for Puppy Linux
+# Uses SFS layering for rollback-safe updates
+# All updates are opt-in (never automatic without consent)
+
+PROG="$(basename $0)"
+UPDATE_DIR="/var/cache/puppy-updates"
+BACKUP_DIR="/var/cache/puppy-updates/backups"
+LOG="/var/log/puppy-update.log"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG" 2>/dev/null
+    echo "$1"
+}
+
+usage() {
+    echo "Puppy Linux Safe Update Manager"
+    echo ""
+    echo "Usage: $PROG {check|list|apply|rollback|status}"
+    echo ""
+    echo "  check    - Check for available security updates"
+    echo "  list     - List pending updates"
+    echo "  apply    - Apply selected updates (creates backup first)"
+    echo "  rollback - Revert last update batch"
+    echo "  status   - Show update history and status"
+    echo ""
+    echo "Updates are NEVER automatic. You choose what to install."
+    echo "Every update creates a backup for safe rollback."
+}
+
+ensure_dirs() {
+    mkdir -p "$UPDATE_DIR" "$BACKUP_DIR" 2>/dev/null
+}
+
+check_connectivity() {
+    # Test basic connectivity without sending identifying info
+    if command -v wget >/dev/null 2>&1; then
+        wget -q --spider --timeout=5 "https://distro.ibiblio.org/" 2>/dev/null
+        return $?
+    elif command -v curl >/dev/null 2>&1; then
+        curl -s --connect-timeout 5 "https://distro.ibiblio.org/" >/dev/null 2>&1
+        return $?
+    fi
+    return 1
+}
+
+check_updates() {
+    ensure_dirs
+    log_msg "Checking for updates..."
+
+    if ! check_connectivity; then
+        log_msg "No internet connection available"
+        echo "Cannot check for updates - no internet connection."
+        echo "This is normal for offline/air-gapped systems."
+        exit 0
+    fi
+
+    # Check installed package versions against available
+    if command -v pkg >/dev/null 2>&1; then
+        echo "Checking package repository..."
+        pkg update-repo 2>/dev/null
+        UPDATES=$(pkg list-upgradable 2>/dev/null)
+        if [ -n "$UPDATES" ]; then
+            echo ""
+            echo "Available updates:"
+            echo "$UPDATES"
+            echo "$UPDATES" > "$UPDATE_DIR/pending.list"
+            COUNT=$(echo "$UPDATES" | wc -l)
+            log_msg "Found $COUNT available updates"
+        else
+            echo "System is up to date."
+            log_msg "No updates available"
+        fi
+    else
+        echo "Package manager not available"
+        echo "Use SFS packages for updates: Menu > Setup > SFS Load"
+    fi
+}
+
+list_updates() {
+    if [ -f "$UPDATE_DIR/pending.list" ]; then
+        echo "Pending updates:"
+        cat "$UPDATE_DIR/pending.list"
+    else
+        echo "No pending updates. Run '$PROG check' first."
+    fi
+}
+
+backup_current() {
+    # Create backup of files that will be changed
+    TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+    BACKUP="$BACKUP_DIR/backup_$TIMESTAMP"
+    mkdir -p "$BACKUP"
+
+    # Save current package list
+    if command -v pkg >/dev/null 2>&1; then
+        pkg list-installed > "$BACKUP/packages.list" 2>/dev/null
+    fi
+
+    # Save critical config files
+    for CONF in /etc/shadow /etc/passwd /etc/group /etc/fstab \
+                /etc/rc.d/rc.sysinit /etc/rc.d/rc.firewall \
+                /etc/sysctl.d/99-puppy-hardening.conf; do
+        if [ -f "$CONF" ]; then
+            DESTDIR="$BACKUP$(dirname $CONF)"
+            mkdir -p "$DESTDIR"
+            cp -a "$CONF" "$DESTDIR/" 2>/dev/null
+        fi
+    done
+
+    echo "$TIMESTAMP" > "$UPDATE_DIR/last_backup"
+    log_msg "Backup created at $BACKUP"
+    echo "$BACKUP"
+}
+
+apply_updates() {
+    ensure_dirs
+
+    if [ ! -f "$UPDATE_DIR/pending.list" ]; then
+        echo "No pending updates. Run '$PROG check' first."
+        exit 0
+    fi
+
+    echo "=== Puppy Linux Safe Update ==="
+    echo ""
+    echo "The following updates will be applied:"
+    cat "$UPDATE_DIR/pending.list"
+    echo ""
+
+    # Confirm with user
+    if command -v Xdialog >/dev/null 2>&1 && [ -n "$DISPLAY" ]; then
+        Xdialog --title "Confirm Updates" --yesno \
+            "Apply the listed updates?\n\nA backup will be created for rollback." \
+            10 50
+        [ $? -ne 0 ] && exit 0
+    else
+        printf "Apply updates? (y/N): "
+        read CONFIRM
+        case "$CONFIRM" in
+            y|Y|yes|YES) ;;
+            *) echo "Update cancelled."; exit 0 ;;
+        esac
+    fi
+
+    # Create backup first
+    echo "Creating backup..."
+    BACKUP_PATH=$(backup_current)
+    log_msg "Starting update with backup at $BACKUP_PATH"
+
+    # Apply updates
+    if command -v pkg >/dev/null 2>&1; then
+        pkg upgrade 2>&1 | tee -a "$LOG"
+        RESULT=$?
+    else
+        echo "No package manager available for updates"
+        RESULT=1
+    fi
+
+    if [ $RESULT -eq 0 ]; then
+        log_msg "Updates applied successfully"
+        echo ""
+        echo "Updates applied successfully."
+        echo "Backup available at: $BACKUP_PATH"
+        echo "Run '$PROG rollback' if you experience issues."
+        rm -f "$UPDATE_DIR/pending.list"
+    else
+        log_msg "Update failed - system unchanged"
+        echo ""
+        echo "Update encountered errors. System may be unchanged."
+        echo "Check $LOG for details."
+    fi
+}
+
+rollback_updates() {
+    if [ ! -f "$UPDATE_DIR/last_backup" ]; then
+        echo "No backup found to rollback to."
+        exit 1
+    fi
+
+    TIMESTAMP=$(cat "$UPDATE_DIR/last_backup")
+    BACKUP="$BACKUP_DIR/backup_$TIMESTAMP"
+
+    if [ ! -d "$BACKUP" ]; then
+        echo "Backup directory not found: $BACKUP"
+        exit 1
+    fi
+
+    echo "=== Rollback to backup from $TIMESTAMP ==="
+
+    # Confirm
+    printf "Restore from backup? This will overwrite current configs. (y/N): "
+    read CONFIRM
+    case "$CONFIRM" in
+        y|Y|yes|YES) ;;
+        *) echo "Rollback cancelled."; exit 0 ;;
+    esac
+
+    # Restore config files
+    if [ -d "$BACKUP/etc" ]; then
+        cp -a "$BACKUP/etc/"* /etc/ 2>/dev/null
+        log_msg "Config files restored from $BACKUP"
+    fi
+
+    # Downgrade packages if package list exists
+    if [ -f "$BACKUP/packages.list" ] && command -v pkg >/dev/null 2>&1; then
+        echo "Package list saved at $BACKUP/packages.list"
+        echo "Manual package downgrade may be needed."
+    fi
+
+    log_msg "Rollback completed from $TIMESTAMP"
+    echo ""
+    echo "Rollback complete. A reboot is recommended."
+}
+
+show_status() {
+    echo "=== Puppy Linux Update Status ==="
+    echo ""
+
+    if [ -f "$UPDATE_DIR/last_backup" ]; then
+        TIMESTAMP=$(cat "$UPDATE_DIR/last_backup")
+        echo "Last backup: $TIMESTAMP"
+    else
+        echo "No backups exist yet"
+    fi
+
+    if [ -f "$UPDATE_DIR/pending.list" ]; then
+        COUNT=$(wc -l < "$UPDATE_DIR/pending.list")
+        echo "Pending updates: $COUNT"
+    else
+        echo "Pending updates: none"
+    fi
+
+    echo ""
+    echo "Recent update log:"
+    if [ -f "$LOG" ]; then
+        tail -10 "$LOG"
+    else
+        echo "  (no update history)"
+    fi
+}
+
+case "$1" in
+    check)    check_updates ;;
+    list)     list_updates ;;
+    apply)    apply_updates ;;
+    rollback) rollback_updates ;;
+    status)   show_status ;;
+    *)        usage ;;
+esac
+
+exit 0

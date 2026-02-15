@@ -3,5 +3,5 @@ Encoding=UTF-8
 Type=Application
 NoDisplay=true
 Name=Default HTML viewer
-Exec=defaulthtmlviewer
+Exec=run-as-spot defaulthtmlviewer
 Icon=/usr/share/pixmaps/puppy/document_viewer.svg

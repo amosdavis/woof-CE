@@ -1,0 +1,31 @@
+#!/bin/sh
+# /etc/init.d/10alsa-save-restore
+# Save and restore ALSA mixer state on boot/shutdown
+# Addresses: audio state loss, sound not working after boot,
+# audio codec conflicts
+
+ALSA_STATE_FILE="/var/lib/alsa/asound.state"
+
+start() {
+    if command -v alsactl >/dev/null 2>&1; then
+        if [ -f "$ALSA_STATE_FILE" ]; then
+            alsactl restore 2>/dev/null
+        else
+            # Initialize with sane defaults
+            alsactl init 2>/dev/null
+        fi
+    fi
+}
+
+stop() {
+    if command -v alsactl >/dev/null 2>&1; then
+        mkdir -p /var/lib/alsa
+        alsactl store 2>/dev/null
+    fi
+}
+
+case "$1" in
+    start) start ;;
+    stop)  stop ;;
+    *)     echo "Usage: $0 {start|stop}" ;;
+esac

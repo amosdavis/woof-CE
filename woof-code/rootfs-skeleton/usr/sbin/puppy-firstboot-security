@@ -1,0 +1,188 @@
+#!/bin/sh
+# /usr/sbin/puppy-firstboot-security
+# First boot security setup for Puppy Linux
+# Addresses: no password set, running as root without authentication,
+# weak default security posture
+# Called from quicksetup / first-run wizard
+
+set_root_password() {
+    if [ -z "$DISPLAY" ]; then
+        # Console mode
+        echo "============================================"
+        echo " Puppy Linux First Boot Security Setup"
+        echo "============================================"
+        echo ""
+        echo "Setting root password (required for system security)..."
+        echo ""
+        passwd root
+        return $?
+    else
+        # GUI mode using gtkdialog or Xdialog
+        DIALOG=""
+        if command -v Xdialog >/dev/null 2>&1; then
+            DIALOG="Xdialog"
+        elif command -v gtkdialog-splash >/dev/null 2>&1; then
+            DIALOG="gtkdialog-splash"
+        fi
+
+        while true; do
+            if [ "$DIALOG" = "Xdialog" ]; then
+                PASS1=$(Xdialog --title "Security Setup" --password --inputbox \
+                    "Set a root password for system security.\nThis password protects system administration." 10 50 2>&1)
+                [ $? -ne 0 ] && return 1
+                PASS2=$(Xdialog --title "Security Setup" --password --inputbox \
+                    "Confirm root password:" 10 50 2>&1)
+                [ $? -ne 0 ] && return 1
+            else
+                # Fallback to console
+                echo "Please set a root password:"
+                stty -echo
+                printf "New password: "
+                read PASS1
+                echo
+                printf "Confirm password: "
+                read PASS2
+                echo
+                stty echo
+            fi
+
+            if [ "$PASS1" != "$PASS2" ]; then
+                if [ "$DIALOG" = "Xdialog" ]; then
+                    Xdialog --title "Error" --msgbox "Passwords do not match. Please try again." 8 40
+                else
+                    echo "Passwords do not match. Please try again."
+                fi
+                continue
+            fi
+
+            if [ ${#PASS1} -lt 8 ]; then
+                if [ "$DIALOG" = "Xdialog" ]; then
+                    Xdialog --title "Error" --msgbox "Password must be at least 8 characters." 8 40
+                else
+                    echo "Password must be at least 8 characters."
+                fi
+                continue
+            fi
+
+            echo "${PASS1}" | passwd root --stdin 2>/dev/null || \
+                echo "root:${PASS1}" | chpasswd 2>/dev/null
+            if [ $? -eq 0 ]; then
+                if [ "$DIALOG" = "Xdialog" ]; then
+                    Xdialog --title "Success" --msgbox "Root password has been set successfully." 8 40
+                else
+                    echo "Root password set successfully."
+                fi
+                return 0
+            else
+                if [ "$DIALOG" = "Xdialog" ]; then
+                    Xdialog --title "Error" --msgbox "Failed to set password. Please try again." 8 40
+                else
+                    echo "Failed to set password."
+                fi
+            fi
+        done
+    fi
+}
+
+check_security_status() {
+    echo "=== Puppy Linux Security Status ==="
+
+    # Check root password
+    ROOT_HASH=$(grep '^root:' /etc/shadow 2>/dev/null | cut -d: -f2)
+    case "$ROOT_HASH" in
+        '!'|'!!'|'*'|'')
+            echo "[WARN] Root password is NOT set"
+            ;;
+        *)
+            echo "[ OK ] Root password is set"
+            ;;
+    esac
+
+    # Check firewall
+    IPT=$(command -v iptables 2>/dev/null)
+    if [ -n "$IPT" ]; then
+        RULES=$($IPT -L -n 2>/dev/null | wc -l)
+        if [ "$RULES" -gt 10 ]; then
+            echo "[ OK ] Firewall is active ($RULES rules)"
+        else
+            echo "[WARN] Firewall is NOT active"
+        fi
+    else
+        echo "[WARN] iptables not installed"
+    fi
+
+    # Check sysctl hardening
+    ASLR=$(cat /proc/sys/kernel/randomize_va_space 2>/dev/null)
+    if [ "$ASLR" = "2" ]; then
+        echo "[ OK ] ASLR is fully enabled"
+    else
+        echo "[WARN] ASLR is not fully enabled (current: $ASLR)"
+    fi
+
+    # Check CPU mitigations
+    if grep -q 'mitigations=off' /proc/cmdline 2>/dev/null; then
+        echo "[WARN] CPU vulnerability mitigations are DISABLED"
+    else
+        echo "[ OK ] CPU vulnerability mitigations are enabled"
+    fi
+
+    # Check IP forwarding
+    FWD=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)
+    if [ "$FWD" = "0" ]; then
+        echo "[ OK ] IP forwarding is disabled"
+    else
+        echo "[WARN] IP forwarding is ENABLED"
+    fi
+
+    # Check SYN cookies
+    SYNC=$(cat /proc/sys/net/ipv4/tcp_syncookies 2>/dev/null)
+    if [ "$SYNC" = "1" ]; then
+        echo "[ OK ] SYN cookies are enabled"
+    else
+        echo "[WARN] SYN cookies are NOT enabled"
+    fi
+
+    # Check certificate validation
+    if grep -q 'check_certificate = off' /etc/wgetrc 2>/dev/null; then
+        echo "[WARN] wget certificate validation is DISABLED"
+    else
+        echo "[ OK ] wget certificate validation is enabled"
+    fi
+
+    echo "==================================="
+}
+
+generate_ssh_keys() {
+    if [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
+        echo "Generating SSH host keys..."
+        ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" 2>/dev/null
+        ssh-keygen -t rsa -b 4096 -f /etc/ssh/ssh_host_rsa_key -N "" 2>/dev/null
+        echo "SSH host keys generated."
+    fi
+}
+
+case "$1" in
+    password)
+        set_root_password
+        ;;
+    status)
+        check_security_status
+        ;;
+    ssh-keys)
+        generate_ssh_keys
+        ;;
+    firstboot)
+        set_root_password
+        generate_ssh_keys
+        check_security_status
+        ;;
+    *)
+        echo "Usage: $0 {password|status|ssh-keys|firstboot}"
+        echo ""
+        echo "  password  - Set/change root password"
+        echo "  status    - Show security status"
+        echo "  ssh-keys  - Generate SSH host keys"
+        echo "  firstboot - Run full first-boot security setup"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,69 @@
+# /etc/ssh/sshd_config - Hardened SSH Server Configuration for Puppy Linux
+# Addresses: weak SSH defaults, root login, password brute-force,
+# information disclosure, agent forwarding attacks
+
+# Protocol version (only v2)
+Protocol 2
+
+# Listen only on specific addresses (localhost by default)
+# Change to 0.0.0.0 or specific IP to allow remote connections
+ListenAddress 127.0.0.1
+
+# Host key files
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_rsa_key
+
+# Logging
+SyslogFacility AUTH
+LogLevel VERBOSE
+
+# Authentication hardening
+PermitRootLogin no
+MaxAuthTries 3
+MaxSessions 3
+LoginGraceTime 30
+
+# Prefer key-based authentication
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+
+# Disable unused authentication methods
+KerberosAuthentication no
+GSSAPIAuthentication no
+HostbasedAuthentication no
+IgnoreRhosts yes
+
+# Disable forwarding (reduces attack surface)
+AllowAgentForwarding no
+AllowTcpForwarding no
+X11Forwarding no
+PermitTunnel no
+GatewayPorts no
+
+# Disable motd (information disclosure)
+PrintMotd no
+PrintLastLog yes
+
+# Idle timeout
+ClientAliveInterval 300
+ClientAliveCountMax 2
+
+# Restrict to specific users (when configured)
+# AllowUsers spot
+
+# Security restrictions
+StrictModes yes
+PermitUserEnvironment no
+
+# Use strong ciphers only
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group-exchange-sha256
+
+# Chroot for SFTP (security isolation)
+Subsystem sftp /usr/lib/openssh/sftp-server -f AUTH -l VERBOSE
+
+# Banner
+Banner /etc/ssh/banner

@@ -158,7 +158,7 @@ if [ $PUPMODE -eq 2 ] ; then
  #no longer deleting /tmp/* in rc.shutdown... (note, init script in initrd.gz wipes it)
  rm -rf /tmp/*
  rm -rf /tmp/.[0-9a-zA-Z]*
- busybox mount -t tmpfs -o size=${QTRFREERAM}k tmpfs /tmp ;STATUS=$((STATUS+$?))
+ busybox mount -t tmpfs -o size=${QTRFREERAM}k,nosuid,nodev tmpfs /tmp ;STATUS=$((STATUS+$?))
  chmod 1777 /tmp 2>/dev/null
  dmesg | grep -o 'EXT[2,3,4]-fs.*running e2fsck is recommended' > /tmp/dmesg_e2fsck_warnings1
  if grep -G "(${PDEV1})" /tmp/dmesg_e2fsck_warnings1 ; then
@@ -255,6 +255,21 @@ busybox mount -a #Load fstab entries
 [ -d /var/run ] && find /var/run -name '*.pid' -delete
 
 sysctl --system
+
+# Verify CPU vulnerability mitigations are enabled (Spectre/Meltdown)
+if grep -q 'mitigations=off' /proc/cmdline 2>/dev/null; then
+	echo "WARNING: CPU vulnerability mitigations are DISABLED!" >/dev/console
+	echo "WARNING: System is vulnerable to Spectre/Meltdown attacks." >/dev/console
+	echo "WARNING: Remove 'mitigations=off' from kernel boot parameters." >/dev/console
+fi
+
+# Set kernel panic reboot timeout (auto-recover from kernel crashes)
+echo 10 > /proc/sys/kernel/panic 2>/dev/null
+
+# Enable hardware watchdog if available (crash recovery)
+if [ -e /dev/watchdog ]; then
+	echo "V" > /dev/watchdog 2>/dev/null
+fi
 
 ## process some specific kernel params here
 for i in $(cat /proc/cmdline) ; do
@@ -754,9 +769,24 @@ echo "PERSONAL BOOT SCRIPT"
 if [ ! -f /etc/rc.d/rc.local ];then
  echo '#this file called from rc.sysinit' > /etc/rc.d/rc.local
  echo '#you can edit this file' >> /etc/rc.d/rc.local
- echo '#When firewall is installed, will append lines to this file...' >> /etc/rc.d/rc.local
+ echo '# Start the default firewall' >> /etc/rc.d/rc.local
+ echo '[ -x /etc/rc.d/rc.firewall ] && /etc/rc.d/rc.firewall start' >> /etc/rc.d/rc.local
 else
  . /etc/rc.d/rc.local
+fi
+
+# Start firewall if not already started by rc.local
+if [ -x /etc/rc.d/rc.firewall ]; then
+ IPT=$(command -v iptables 2>/dev/null)
+ [ -z "$IPT" ] && IPT=$(command -v iptables-legacy 2>/dev/null)
+ if [ -n "$IPT" ]; then
+  FWRULES=$($IPT -L -n 2>/dev/null | wc -l)
+  if [ "$FWRULES" -le 10 ]; then
+   echo -n "Starting default firewall..." >/dev/console
+   /etc/rc.d/rc.firewall start >/dev/null 2>&1
+   status_func $?
+  fi
+ fi
 fi
 
 #improper shutdown check. see above, also rc.shutdown and /sbin/init...
