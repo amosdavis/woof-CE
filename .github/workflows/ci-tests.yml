@@ -1,0 +1,52 @@
+name: ci-tests
+
+on:
+  push:
+    branches: [ security-hardening, testing ]
+  pull_request:
+    branches: [ security-hardening, testing ]
+  workflow_dispatch:
+
+jobs:
+  bdd-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache-dependency-path: tests/go.sum
+
+    - name: Run BDD tests
+      run: |
+        cd tests/steps
+        go test -v -run TestFeatures
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install ShellCheck
+      run: sudo apt-get install -y shellcheck
+
+    - name: Lint security scripts
+      run: |
+        shellcheck -s sh -e SC1091,SC2086,SC2034,SC2155 \
+          woof-code/rootfs-skeleton/etc/rc.d/rc.firewall \
+          woof-code/rootfs-skeleton/etc/profile.d/security-hardening.sh \
+          woof-code/rootfs-skeleton/etc/profile.d/hidpi-detect.sh \
+          woof-code/rootfs-skeleton/usr/sbin/puppy-firstboot-security \
+          woof-code/rootfs-skeleton/usr/sbin/puppy-encrypt-save \
+          woof-code/rootfs-skeleton/usr/sbin/puppy-update \
+          woof-code/rootfs-skeleton/usr/sbin/puppy-hardware-check \
+          woof-code/rootfs-skeleton/usr/sbin/puppy-jwm-recovery \
+          woof-code/rootfs-skeleton/usr/sbin/puppy-memory-watchdog \
+          woof-code/rootfs-skeleton/usr/sbin/puppy-search \
+          woof-code/rootfs-skeleton/usr/sbin/puppy-theme-manager \
+          woof-code/rootfs-skeleton/usr/sbin/xrandr-gui \
+          || true

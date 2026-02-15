@@ -18,7 +18,6 @@ jobs:
             compat-distro: slackware
             compat-distro-version: s15pup32
             kernel: 6.6.x
-    if: github.repository == 'puppylinux-woof-CE/woof-CE'
     uses: ./.github/workflows/build.yml
     with:
       repo: ${{ github.repository }}
