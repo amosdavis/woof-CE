@@ -713,6 +713,63 @@ rm -f rootfs-complete/etc/profile.d/*.csh* 2>/dev/null # slackware 13.1
 #sanity check...
 echo
 
+# Security audit: check critical packages for known vulnerability versions
+echo "=== Security Audit ==="
+SECURITY_WARNINGS=0
+
+# Check for Heartbleed-vulnerable OpenSSL (< 1.0.1g)
+if [ -f rootfs-complete/usr/lib/libssl.so.1.0.0 ] 2>/dev/null; then
+	OPENSSL_VER=$(chroot rootfs-complete openssl version 2>/dev/null | awk '{print $2}')
+	if [ -n "$OPENSSL_VER" ]; then
+		case "$OPENSSL_VER" in
+			1.0.1|1.0.1[a-f])
+				echo "SECURITY WARNING: OpenSSL $OPENSSL_VER is vulnerable to Heartbleed (CVE-2014-0160)"
+				SECURITY_WARNINGS=$((SECURITY_WARNINGS+1))
+				;;
+		esac
+	fi
+fi
+
+# Check for Shellshock-vulnerable bash (< 4.3 patch 25)
+if [ -f rootfs-complete/bin/bash ] 2>/dev/null; then
+	BASH_VER=$(chroot rootfs-complete bash --version 2>/dev/null | head -1 | grep -oP '\d+\.\d+\.\d+')
+	if [ -n "$BASH_VER" ]; then
+		BASH_MAJOR=$(echo "$BASH_VER" | cut -d. -f1)
+		BASH_MINOR=$(echo "$BASH_VER" | cut -d. -f2)
+		BASH_PATCH=$(echo "$BASH_VER" | cut -d. -f3)
+		if [ "$BASH_MAJOR" -lt 4 ] 2>/dev/null || \
+		   ([ "$BASH_MAJOR" -eq 4 ] && [ "$BASH_MINOR" -lt 3 ]) 2>/dev/null; then
+			echo "SECURITY WARNING: bash $BASH_VER may be vulnerable to Shellshock (CVE-2014-6271)"
+			SECURITY_WARNINGS=$((SECURITY_WARNINGS+1))
+		fi
+	fi
+fi
+
+# Check for Java (Log4Shell attack vector - CVE-2021-44228)
+if [ -f rootfs-complete/usr/bin/java ] 2>/dev/null || \
+   [ -d rootfs-complete/usr/lib/jvm ] 2>/dev/null; then
+	echo "SECURITY WARNING: Java detected - potential Log4Shell (CVE-2021-44228) attack vector"
+	echo "  Remove Java unless absolutely required"
+	SECURITY_WARNINGS=$((SECURITY_WARNINGS+1))
+fi
+
+# Check for vulnerable XZ Utils (CVE-2024-3094, versions 5.6.0-5.6.1)
+if [ -f rootfs-complete/usr/bin/xz ] 2>/dev/null; then
+	XZ_VER=$(chroot rootfs-complete xz --version 2>/dev/null | head -1 | grep -oP '\d+\.\d+\.\d+')
+	if [ "$XZ_VER" = "5.6.0" ] || [ "$XZ_VER" = "5.6.1" ]; then
+		echo "SECURITY CRITICAL: XZ Utils $XZ_VER has backdoor (CVE-2024-3094) - MUST be replaced!"
+		SECURITY_WARNINGS=$((SECURITY_WARNINGS+1))
+	fi
+fi
+
+if [ $SECURITY_WARNINGS -gt 0 ]; then
+	echo "=== $SECURITY_WARNINGS security warning(s) found ==="
+	echo "  Review warnings above before distributing this build"
+else
+	echo "=== No known vulnerable package versions detected ==="
+fi
+echo
+
 if [ $CROSSBUILD -eq 0 -o -n "$QEMU" ];then #111123
 	chroot rootfs-complete echo 'testing chroot'
 	if [ $? -ne 0 ];then

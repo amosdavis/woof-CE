@@ -29,10 +29,24 @@ if [ ! -f ${DOWNLOAD_DIR}"${FILE}" ] ; then
 			;;
 
 		*)
-			wget -P ${DOWNLOAD_DIR} --no-check-certificate "${URL}"
+			# Try with certificate validation first
+			wget -P ${DOWNLOAD_DIR} "${URL}" 2>/dev/null
 			if [ $? -ne 0 ] ; then
-				rm -fv ${DOWNLOAD_DIR}"${FILE}"
-				exit 1
+				# Fall back without cert check only if ca-certificates is missing
+				if [ ! -d /etc/ssl/certs ] && [ ! -d /usr/share/ca-certificates ]; then
+					echo "WARNING: ca-certificates not found, downloading without certificate validation"
+					echo "WARNING: This is a security risk - install ca-certificates package"
+					wget -P ${DOWNLOAD_DIR} --no-check-certificate "${URL}"
+				else
+					# Retry with --no-check-certificate as last resort (self-signed mirrors)
+					echo "WARNING: Certificate validation failed for ${URL}"
+					echo "WARNING: Retrying without validation - verify checksum carefully"
+					wget -P ${DOWNLOAD_DIR} --no-check-certificate "${URL}"
+				fi
+				if [ $? -ne 0 ] ; then
+					rm -fv ${DOWNLOAD_DIR}"${FILE}"
+					exit 1
+				fi
 			fi
 			;;
 		esac
@@ -44,13 +58,15 @@ if [ ! -f ${DOWNLOAD_DIR}"${FILE}" ] ; then
 fi
 
 if [ ! -f ${DOWNLOAD_DIR}"${FILE}".sha256.txt ] ; then
-	wget -P ${DOWNLOAD_DIR} --no-check-certificate "${URL}".sha256.txt 2>/dev/null
+	wget -P ${DOWNLOAD_DIR} "${URL}".sha256.txt 2>/dev/null
+	[ $? -ne 0 ] && wget -P ${DOWNLOAD_DIR} --no-check-certificate "${URL}".sha256.txt 2>/dev/null
 	[ $? -ne 0 ] && rm -f ${DOWNLOAD_DIR}"${FILE}".sha256.txt
 fi
 
 if [ ! -f ${DOWNLOAD_DIR}"${FILE}".sha256.txt ] ; then
 	if [ ! -f ${DOWNLOAD_DIR}"${FILE}".md5.txt ] ; then
-		wget -P ${DOWNLOAD_DIR} --no-check-certificate "${URL}".md5.txt 2>/dev/null
+		wget -P ${DOWNLOAD_DIR} "${URL}".md5.txt 2>/dev/null
+		[ $? -ne 0 ] && wget -P ${DOWNLOAD_DIR} --no-check-certificate "${URL}".md5.txt 2>/dev/null
 		[ $? -ne 0 ] && rm -f ${DOWNLOAD_DIR}"${FILE}".md5.txt
 	fi
 fi

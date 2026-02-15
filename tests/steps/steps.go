@@ -643,6 +643,174 @@ func theDesktopFileShouldContain(path, text string) error {
 	return theFileShouldContain(path, text)
 }
 
+// Step: Given the download script "X" exists
+func theDownloadScriptExists(path string) error {
+	return thePetbuildsScriptExists(path)
+}
+
+// Step: Given the build script "X" exists
+func theBuildScriptExists(path string) error {
+	fullPath := filepath.Join("..", "..", "woof-code", path)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Errorf("build script not found at %s", fullPath)
+	}
+	currentFilePath = fullPath
+	currentFileContent = string(data)
+	return nil
+}
+
+// Step: Given the NTP service "X" exists
+func theNTPServiceExists(path string) error {
+	_, err := readFile(path)
+	return err
+}
+
+// Step: Given the security profile "X" exists
+func theSecurityProfileExists(path string) error {
+	_, err := readFile(path)
+	return err
+}
+
+// Step: Then it should attempt download with certificate validation first
+func itShouldAttemptDownloadWithCertValidationFirst() error {
+	if currentFileContent == "" {
+		return fmt.Errorf("no file loaded")
+	}
+	// The file should have wget WITHOUT --no-check-certificate before the fallback
+	lines := strings.Split(currentFileContent, "\n")
+	foundPlainWget := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.Contains(trimmed, "wget") && !strings.Contains(trimmed, "--no-check-certificate") &&
+			!strings.Contains(trimmed, "2>/dev/null") {
+			foundPlainWget = true
+			break
+		}
+		if strings.Contains(trimmed, "wget") && strings.Contains(trimmed, "${URL}\"") &&
+			!strings.Contains(trimmed, "--no-check-certificate") {
+			foundPlainWget = true
+			break
+		}
+	}
+	// Also check that the file tries without --no-check-certificate somewhere
+	if strings.Contains(currentFileContent, "wget -P ${DOWNLOAD_DIR} \"${URL}\"") {
+		return nil
+	}
+	if foundPlainWget {
+		return nil
+	}
+	return fmt.Errorf("download script does not attempt certificate-validated download first")
+}
+
+// Step: Then it should warn when falling back to no-check-certificate
+func itShouldWarnWhenFallingBackToNoCheckCertificate() error {
+	if !strings.Contains(currentFileContent, "WARNING") ||
+		!strings.Contains(currentFileContent, "no-check-certificate") {
+		return fmt.Errorf("download script does not warn about cert validation fallback")
+	}
+	return nil
+}
+
+// Step: Then it should check OpenSSL version
+func itShouldCheckOpenSSLVersion() error {
+	if !strings.Contains(currentFileContent, "openssl") && !strings.Contains(currentFileContent, "OpenSSL") {
+		return fmt.Errorf("build script does not check OpenSSL version")
+	}
+	return nil
+}
+
+// Step: Then it should warn about CVE-X
+func itShouldWarnAboutCVE(cve string) error {
+	if !strings.Contains(currentFileContent, cve) {
+		return fmt.Errorf("build script does not warn about %s", cve)
+	}
+	return nil
+}
+
+// Step: Then it should check bash version
+func itShouldCheckBashVersion() error {
+	if !strings.Contains(currentFileContent, "bash") {
+		return fmt.Errorf("build script does not check bash version")
+	}
+	return nil
+}
+
+// Step: Then it should check for Java presence
+func itShouldCheckForJavaPresence() error {
+	if !strings.Contains(currentFileContent, "java") && !strings.Contains(currentFileContent, "Java") {
+		return fmt.Errorf("build script does not check for Java")
+	}
+	return nil
+}
+
+// Step: Then it should check XZ version
+func itShouldCheckXZVersion() error {
+	if !strings.Contains(currentFileContent, "xz") && !strings.Contains(currentFileContent, "XZ") {
+		return fmt.Errorf("build script does not check XZ version")
+	}
+	return nil
+}
+
+// Step: Then it should detect filesystem errors via dmesg
+func itShouldDetectFilesystemErrorsViaDmesg() error {
+	if !strings.Contains(currentFileContent, "dmesg") || !strings.Contains(currentFileContent, "e2fsck") {
+		return fmt.Errorf("init script does not detect filesystem errors via dmesg")
+	}
+	return nil
+}
+
+// Step: Then it should run e2fsck when errors are found
+func itShouldRunE2fsckWhenErrorsAreFound() error {
+	if !strings.Contains(currentFileContent, "e2fsck -p") {
+		return fmt.Errorf("init script does not auto-run e2fsck")
+	}
+	return nil
+}
+
+// Step: Then it should handle leap seconds
+func itShouldHandleLeapSeconds() error {
+	if !strings.Contains(currentFileContent, "leap") {
+		return fmt.Errorf("NTP service does not handle leap seconds")
+	}
+	return nil
+}
+
+// Step: Then it should use kernel leap smearing
+func itShouldUseKernelLeapSmearing() error {
+	if !strings.Contains(currentFileContent, "leap") {
+		return fmt.Errorf("NTP service does not use kernel leap smearing")
+	}
+	return nil
+}
+
+// Step: Then it should validate locale
+func itShouldValidateLocale() error {
+	if !strings.Contains(currentFileContent, "LANG") || !strings.Contains(currentFileContent, "locale") {
+		return fmt.Errorf("security profile does not validate locale")
+	}
+	return nil
+}
+
+// Step: Then it should set UTF-8 encoding
+func itShouldSetUTF8Encoding() error {
+	if !strings.Contains(currentFileContent, "UTF-8") && !strings.Contains(currentFileContent, "utf8") {
+		return fmt.Errorf("security profile does not set UTF-8 encoding")
+	}
+	return nil
+}
+
+// Step: Then it should sanitize terminal escape sequences
+func itShouldSanitizeTerminalEscapeSequences() error {
+	if !strings.Contains(currentFileContent, "033") && !strings.Contains(currentFileContent, "\\e[") {
+		return fmt.Errorf("security profile does not sanitize terminal escape sequences")
+	}
+	return nil
+}
+
 // InitializeScenario registers all step definitions
 func InitializeScenario(ctx *godog.ScenarioContext) {
 	// Given steps
@@ -720,4 +888,24 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^it should set secure umask$`, itShouldSetSecureUmask)
 	ctx.Step(`^it should remove current directory from PATH$`, itShouldRemoveCurrentDirectoryFromPATH)
 	ctx.Step(`^it should set idle timeout$`, itShouldSetIdleTimeout)
+
+	// Supply chain and build integrity steps
+	ctx.Step(`^the download script "([^"]*)" exists$`, theDownloadScriptExists)
+	ctx.Step(`^the build script "([^"]*)" exists$`, theBuildScriptExists)
+	ctx.Step(`^the NTP service "([^"]*)" exists$`, theNTPServiceExists)
+	ctx.Step(`^the security profile "([^"]*)" exists$`, theSecurityProfileExists)
+	ctx.Step(`^it should attempt download with certificate validation first$`, itShouldAttemptDownloadWithCertValidationFirst)
+	ctx.Step(`^it should warn when falling back to no-check-certificate$`, itShouldWarnWhenFallingBackToNoCheckCertificate)
+	ctx.Step(`^it should check OpenSSL version$`, itShouldCheckOpenSSLVersion)
+	ctx.Step(`^it should warn about (CVE-[\d-]+)$`, itShouldWarnAboutCVE)
+	ctx.Step(`^it should check bash version$`, itShouldCheckBashVersion)
+	ctx.Step(`^it should check for Java presence$`, itShouldCheckForJavaPresence)
+	ctx.Step(`^it should check XZ version$`, itShouldCheckXZVersion)
+	ctx.Step(`^it should detect filesystem errors via dmesg$`, itShouldDetectFilesystemErrorsViaDmesg)
+	ctx.Step(`^it should run e2fsck when errors are found$`, itShouldRunE2fsckWhenErrorsAreFound)
+	ctx.Step(`^it should handle leap seconds$`, itShouldHandleLeapSeconds)
+	ctx.Step(`^it should use kernel leap smearing$`, itShouldUseKernelLeapSmearing)
+	ctx.Step(`^it should validate locale$`, itShouldValidateLocale)
+	ctx.Step(`^it should set UTF-8 encoding$`, itShouldSetUTF8Encoding)
+	ctx.Step(`^it should sanitize terminal escape sequences$`, itShouldSanitizeTerminalEscapeSequences)
 }

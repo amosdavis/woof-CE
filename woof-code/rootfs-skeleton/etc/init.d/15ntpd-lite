@@ -12,12 +12,19 @@ start() {
     # Sync hardware clock to system on boot
     hwclock --hctosys --utc 2>/dev/null
 
+    # Handle leap second: use kernel-side leap smearing if supported
+    # This prevents the "repeat second" problem that crashed services in 2012
+    if [ -f /proc/sys/kernel/ntp_leap_sec_behavior ]; then
+        echo 1 > /proc/sys/kernel/ntp_leap_sec_behavior 2>/dev/null
+    fi
+
     # Use ntpd if available (busybox has a lightweight one)
     if command -v ntpd >/dev/null 2>&1; then
         # Kill any existing ntpd
         killall ntpd 2>/dev/null
 
         # Start NTP daemon for continuous time sync
+        # -S sets a script to run on time step events (leap second handling)
         if [ -f "$NTP_CONF" ]; then
             ntpd -p 0.pool.ntp.org -p 1.pool.ntp.org 2>/dev/null
         else

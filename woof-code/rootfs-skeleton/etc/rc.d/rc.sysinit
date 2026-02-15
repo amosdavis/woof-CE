@@ -165,6 +165,15 @@ if [ $PUPMODE -eq 2 ] ; then
    #EXT3-fs (sda9): warning: mounting fs with errors, running e2fsck is recommended
    #EXT3-fs (sda10): warning: maximal mount count reached, running e2fsck is recommended
    echo > /tmp/bootsysinit_must_fsck
+   # Auto-repair filesystem errors if e2fsck is available
+   if command -v e2fsck >/dev/null 2>&1 && [ -n "$PDEV1" ]; then
+     echo "Filesystem errors detected on ${PDEV1}, running e2fsck -p..."
+     e2fsck -p /dev/${PDEV1} 2>/dev/null
+     if [ $? -ge 4 ]; then
+       echo "WARNING: Filesystem errors could not be automatically repaired on ${PDEV1}"
+       echo "WARNING: Manual fsck required. Run: e2fsck -y /dev/${PDEV1}"
+     fi
+   fi
  fi
 fi
 #===============
